@@ -6,7 +6,6 @@ const fs = require('fs');
 let authWindow;
 let mainWindow;
 let preferencesWindow;
-let unreadCount = 0;
 let isAuthenticated = false;
 
 // Google Meet URLs
@@ -14,14 +13,15 @@ const GOOGLE_MEET_URL = 'https://meet.google.com';
 const GOOGLE_MEET_APP_URL = 'https://meet.google.com';
 
 /**
- * BadgeStateManager - Centralized badge state management
+ * BadgeStateManager - Centralized badge state management for meetings
  *
  * Single source of truth for dock badge to prevent race conditions and state conflicts.
  * This class consolidates all badge-related operations into a single, managed interface
  * that handles debouncing, focus-aware updates, and periodic verification.
  *
  * Key Features:
- * - Debounced updates (200ms) for rapid title changes
+ * - Meeting detection based on URL and DOM state
+ * - Debounced updates (200ms) for rapid state changes
  * - Immediate updates on window focus for accuracy
  * - State locking to prevent concurrent badge modifications
  * - Periodic verification (5s) to catch drift when window is unfocused
@@ -46,8 +46,8 @@ class BadgeStateManager {
    * @constructor
    */
   constructor() {
-    /** @type {number} Current unread message count */
-    this.unreadCount = 0;
+    /** @type {boolean} Whether user is currently in a meeting */
+    this.inMeeting = false;
 
     /** @type {boolean} Whether the main window currently has focus */
     this.windowFocused = false;
@@ -67,38 +67,35 @@ class BadgeStateManager {
     /** @type {number} Number of retry attempts for locked state */
     this.retryCount = 0;
 
-    console.log('[BadgeStateManager] Initialized');
+    console.log('[BadgeStateManager] Initialized for meeting detection');
   }
 
   /**
-   * Set the unread count and update badge
+   * Set the meeting state and update badge
    *
-   * Updates the internal unread count and triggers a badge update. The update
+   * Updates the internal meeting state and triggers a badge update. The update
    * can be either debounced (200ms delay) or immediate based on the `immediate`
    * parameter and window focus state.
    *
-   * Validation: Rejects non-numeric, negative, or infinite values.
-   * Logging: Logs all count changes for debugging.
-   *
-   * @param {number} count - Number of unread messages (must be >= 0 and finite)
+   * @param {boolean} inMeeting - Whether user is currently in a meeting
    * @param {boolean} [immediate=false] - If true, skip debouncing for immediate update
    * @returns {void}
    */
-  setUnreadCount(count, immediate = false) {
-    // Validate count
-    if (typeof count !== 'number' || count < 0 || !isFinite(count)) {
-      console.warn('[BadgeStateManager] Invalid count received:', count);
+  setMeetingState(inMeeting, immediate = false) {
+    // Validate meeting state
+    if (typeof inMeeting !== 'boolean') {
+      console.warn('[BadgeStateManager] Invalid meeting state received:', inMeeting);
       return;
     }
 
     // Detect state change
-    const countChanged = this.unreadCount !== count;
-    const previousCount = this.unreadCount;
+    const stateChanged = this.inMeeting !== inMeeting;
+    const previousState = this.inMeeting;
 
-    this.unreadCount = count;
+    this.inMeeting = inMeeting;
 
-    if (countChanged) {
-      console.log(`[BadgeStateManager] Count changed: ${previousCount} → ${count}`);
+    if (stateChanged) {
+      console.log(`[BadgeStateManager] Meeting state changed: ${previousState} → ${inMeeting}`);
     }
 
     // Update badge with debouncing (unless immediate or focus event)
@@ -132,33 +129,105 @@ class BadgeStateManager {
   }
 
   /**
-   * Sync badge from current page title
+   * Sync badge from current meeting state
    *
-   * Fallback mechanism to re-read unread count from the main window's page title.
-   * Parses the title for the pattern "(N) ..." where N is the unread count.
-   * If no count is found, sets unread count to 0.
-   *
+   * Checks if user is currently in a meeting by examining URL and DOM.
    * This is used for:
    * - Periodic verification to catch drift
    * - Emergency sync on window activation
    * - Recovery after notification clicks
    *
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  syncFromTitle() {
+  async syncFromMeetingState() {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      const title = mainWindow.getTitle();
-      const match = title.match(/^\((\d+)\)/);
+      const inMeeting = await this.getCurrentMeetingState();
 
-      if (match) {
-        const count = parseInt(match[1], 10);
-        console.log(`[BadgeStateManager] Syncing from title: "${title}" → count: ${count}`);
-        this.setUnreadCount(count, true);
-      } else {
-        console.log(`[BadgeStateManager] Syncing from title: "${title}" → count: 0`);
-        this.setUnreadCount(0, true);
-      }
+      console.log(`[BadgeStateManager] Syncing meeting state → inMeeting: ${inMeeting}`);
+      this.setMeetingState(inMeeting, true);
     }
+  }
+
+  /**
+   * Check if URL indicates an active meeting
+   *
+   * Google Meet URLs follow the pattern: meet.google.com/{meeting-code}
+   * Meeting codes are typically 3 groups of letters separated by hyphens (e.g., abc-defg-hij)
+   *
+   * @param {string} url - The URL to check
+   * @returns {boolean} True if URL indicates an active meeting
+   */
+  isMeetingURL(url) {
+    // Match Google Meet meeting room URLs
+    // Pattern: meet.google.com/{meeting-code} where code is like "abc-defg-hij"
+    const meetingPattern = /meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/i;
+    return meetingPattern.test(url);
+  }
+
+  /**
+   * Check if DOM indicates an active meeting
+   *
+   * Examines the page DOM for elements that indicate the user is in an active meeting.
+   * This provides additional verification beyond URL matching.
+   *
+   * @returns {Promise<boolean>} True if DOM indicates an active meeting
+   */
+  async checkMeetingDOM() {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return false;
+    }
+
+    try {
+      const result = await mainWindow.webContents.executeJavaScript(`
+        (function() {
+          // Look for Google Meet's video container or control buttons
+          // These elements are present when in an active meeting
+          const videoElements = document.querySelector('[data-allocation-index]') ||
+                               document.querySelector('[data-self-name]') ||
+                               document.querySelector('div[jsname][data-participant-id]');
+
+          const controlButtons = document.querySelector('[data-mute-button]') ||
+                                document.querySelector('[aria-label*="microphone"]') ||
+                                document.querySelector('[aria-label*="camera"]') ||
+                                document.querySelector('[aria-label*="Leave call"]');
+
+          return !!(videoElements || controlButtons);
+        })()
+      `);
+      return result === true;
+    } catch (error) {
+      console.error('[BadgeStateManager] Error checking meeting DOM:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get comprehensive meeting state (URL + DOM verification)
+   *
+   * Combines URL-based and DOM-based detection for the most accurate meeting state.
+   * Both checks must pass for a positive meeting detection.
+   *
+   * @returns {Promise<boolean>} True if user is in an active meeting
+   */
+  async getCurrentMeetingState() {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return false;
+    }
+
+    const url = mainWindow.webContents.getURL();
+    const urlCheck = this.isMeetingURL(url);
+
+    // If URL doesn't indicate a meeting, no need to check DOM
+    if (!urlCheck) {
+      return false;
+    }
+
+    // Verify with DOM check for additional accuracy
+    const domCheck = await this.checkMeetingDOM();
+
+    console.log(`[BadgeStateManager] Meeting state - URL: ${urlCheck}, DOM: ${domCheck}`);
+
+    return urlCheck && domCheck;
   }
 
   /**
@@ -211,13 +280,10 @@ class BadgeStateManager {
    * conditions and persistent badge dots.
    *
    * Behavior:
-   * - If count > 0: displays count as badge (e.g., "5")
-   * - If count = 0: displays empty string to remove badge completely
+   * - If in meeting: displays "•" (bullet point) as badge
+   * - If not in meeting: displays empty string to remove badge completely
    * - If already updating: queues a retry with limit (MAX_RETRIES)
    * - macOS only: no-op on other platforms
-   *
-   * Also updates the global `unreadCount` variable for backwards compatibility.
-   * TODO: Phase out global unreadCount once BadgeStateManager is fully validated
    *
    * @private
    * @returns {void}
@@ -245,16 +311,12 @@ class BadgeStateManager {
 
     try {
       const now = Date.now();
-      const badgeValue = this.unreadCount > 0 ? this.unreadCount.toString() : '';
+      const badgeValue = this.inMeeting ? '•' : '';
 
-      console.log(`[BadgeStateManager] Applying badge: "${badgeValue}" (count: ${this.unreadCount}, focused: ${this.windowFocused})`);
+      console.log(`[BadgeStateManager] Applying badge: "${badgeValue}" (inMeeting: ${this.inMeeting}, focused: ${this.windowFocused})`);
 
       app.dock.setBadge(badgeValue);
       this.lastUpdateTime = now;
-
-      // Update global unreadCount for backwards compatibility
-      // TODO: Remove this once all code paths use BadgeStateManager directly
-      unreadCount = this.unreadCount;
 
     } catch (error) {
       console.error('[BadgeStateManager] Error applying badge:', error);
@@ -264,9 +326,9 @@ class BadgeStateManager {
   }
 
   /**
-   * Reset badge to zero and clear all state
+   * Reset badge and clear all state
    *
-   * Immediately sets the unread count to 0 and clears the window focus state.
+   * Immediately sets the meeting state to false and clears the window focus state.
    * Also clears any pending timeouts to prevent stale updates.
    * Used primarily during sign-out to ensure clean state before showing auth window.
    *
@@ -281,7 +343,7 @@ class BadgeStateManager {
       this.updateTimeout = null;
     }
 
-    this.setUnreadCount(0, true);
+    this.setMeetingState(false, true);
     this.windowFocused = false;
     this.retryCount = 0;
   }
@@ -289,9 +351,9 @@ class BadgeStateManager {
   /**
    * Start periodic verification to catch drift
    *
-   * Starts an interval that runs syncFromTitle() periodically when the window
+   * Starts an interval that runs syncFromMeetingState() periodically when the window
    * is not focused. This failsafe mechanism catches any drift between the actual
-   * page title and the badge state (e.g., if a title update was missed).
+   * meeting state and the badge state (e.g., if a URL change was missed).
    *
    * Safe to call multiple times - only creates one interval.
    *
@@ -305,7 +367,7 @@ class BadgeStateManager {
     this.verificationInterval = setInterval(() => {
       if (!this.windowFocused && mainWindow && !mainWindow.isDestroyed()) {
         console.log('[BadgeStateManager] Running periodic verification');
-        this.syncFromTitle();
+        this.syncFromMeetingState();
       }
     }, BadgeStateManager.VERIFICATION_INTERVAL_MS);
 
@@ -573,8 +635,8 @@ function createMainWindow() {
     }
 
     // Initialize badge to clean state on startup
-    // This prevents residual dots from previous sessions
-    badgeManager.setUnreadCount(0, true);
+    // This prevents residual indicators from previous sessions
+    badgeManager.setMeetingState(false, true);
 
     // Set window as focused to prevent attention indicators
     badgeManager.setWindowFocused(true);
@@ -611,15 +673,18 @@ function createMainWindow() {
     }
   });
 
-  // Monitor page title for unread count
-  mainWindow.webContents.on('page-title-updated', (event, title) => {
-    const match = title.match(/^\((\d+)\)/);
-    if (match) {
-      const count = parseInt(match[1], 10);
-      updateUnreadCount(count);
-    } else {
-      updateUnreadCount(0);
-    }
+  // Monitor navigation for meeting detection
+  mainWindow.webContents.on('did-navigate', (event, url) => {
+    const inMeeting = badgeManager.isMeetingURL(url);
+    console.log(`[MeetMac] Navigation detected: ${url} → inMeeting: ${inMeeting}`);
+    badgeManager.setMeetingState(inMeeting);
+  });
+
+  // Also monitor in-page navigation (for single-page app transitions)
+  mainWindow.webContents.on('did-navigate-in-page', (event, url) => {
+    const inMeeting = badgeManager.isMeetingURL(url);
+    console.log(`[MeetMac] In-page navigation detected: ${url} → inMeeting: ${inMeeting}`);
+    badgeManager.setMeetingState(inMeeting);
   });
 
   // Inject custom CSS and notification monitoring
@@ -799,6 +864,13 @@ function createMainWindow() {
 
       console.log('Enhanced notification system initialized');
     `);
+
+    // Check meeting state after page loads (with small delay for DOM to settle)
+    setTimeout(async () => {
+      const inMeeting = await badgeManager.getCurrentMeetingState();
+      console.log(`[MeetMac] Page loaded, meeting state: ${inMeeting}`);
+      badgeManager.setMeetingState(inMeeting);
+    }, 1000);
   });
 
   mainWindow.on('close', (event) => {
@@ -966,20 +1038,7 @@ function createMenu() {
   Menu.setApplicationMenu(menu);
 }
 
-function updateUnreadCount(count) {
-  const previousCount = unreadCount;
-
-  // Update badge state through centralized manager
-  badgeManager.setUnreadCount(count);
-
-  if (mainWindow) {
-    const title = count > 0 ? `(${count}) MeetMac` : 'MeetMac';
-    mainWindow.setTitle(title);
-
-    // Note: flashFrame() removed - was causing persistent dock dots
-    // Badge-only indication is more reliable and doesn't leave artifacts
-  }
-}
+// Note: updateUnreadCount function removed - MeetMac tracks meeting state instead of unread counts
 
 async function signOut() {
   try {
@@ -1104,10 +1163,10 @@ ipcMain.on('notification', (event, data) => {
         }
         mainWindow.focus();
 
-        // Sync badge state from current page title after focusing
-        // This ensures accurate badge count after user interaction
+        // Sync badge state from current meeting state after focusing
+        // This ensures accurate badge after user interaction
         setTimeout(() => {
-          badgeManager.syncFromTitle();
+          badgeManager.syncFromMeetingState();
         }, BadgeStateManager.SYNC_DELAY_MS);
       }
     });
@@ -1167,7 +1226,7 @@ app.whenReady().then(async () => {
       // Emergency badge sync when app is activated
       // Ensures badge is accurate after being in background
       setTimeout(() => {
-        badgeManager.syncFromTitle();
+        badgeManager.syncFromMeetingState();
       }, BadgeStateManager.SYNC_DELAY_MS);
     }
   });
