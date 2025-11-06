@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none';">
+  <title>MeetMac Preferences</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #f5f5f7;
+      overflow: hidden;
+      padding-top: 38px;
+    }
+
+    .titlebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 38px;
+      background: white;
+      -webkit-app-region: drag;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      border-bottom: 1px solid #e5e5e7;
+    }
+
+    .titlebar-text {
+      font-size: 13px;
+      font-weight: 500;
+      color: #1d1d1f;
+      letter-spacing: 0.2px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 20px auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+    }
+
+    .header {
+      padding: 24px;
+      border-bottom: 1px solid #e5e5e7;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1d1d1f;
+      margin-bottom: 8px;
+    }
+
+    .header p {
+      font-size: 14px;
+      color: #86868b;
+    }
+
+    .section {
+      padding: 24px;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1d1d1f;
+      margin-bottom: 16px;
+    }
+
+    .account-list {
+      list-style: none;
+      margin-bottom: 16px;
+    }
+
+    .account-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: #f5f5f7;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      transition: background 0.2s;
+    }
+
+    .account-item:hover {
+      background: #e8e8ed;
+    }
+
+    .account-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .account-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .account-details {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .account-email {
+      font-size: 14px;
+      font-weight: 500;
+      color: #1d1d1f;
+    }
+
+    .account-status {
+      font-size: 12px;
+      color: #86868b;
+    }
+
+    .account-status.active {
+      color: #34c759;
+    }
+
+    .account-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      -webkit-app-region: no-drag;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-secondary {
+      background: #e5e5e7;
+      color: #1d1d1f;
+    }
+
+    .btn-secondary:hover {
+      background: #d2d2d7;
+    }
+
+    .btn-danger {
+      background: #ff3b30;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #ff2d20;
+    }
+
+    .btn-large {
+      padding: 12px 24px;
+      font-size: 14px;
+      width: 100%;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: #86868b;
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .empty-state-text {
+      font-size: 15px;
+      margin-bottom: 24px;
+    }
+
+    .info-box {
+      background: #f5f5f7;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+      font-size: 13px;
+      color: #86868b;
+      line-height: 1.5;
+    }
+
+    .divider {
+      height: 1px;
+      background: #e5e5e7;
+      margin: 24px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-text">Preferences</div>
+  </div>
+
+  <div class="container">
+    <div class="header">
+      <h1>Accounts</h1>
+      <p>Manage your Google accounts for MeetMac</p>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Google Accounts</div>
+
+      <ul class="account-list" id="accountList">
+        <!-- Accounts will be populated here -->
+      </ul>
+
+      <button class="btn btn-primary btn-large" id="addAccountBtn">
+        <span>+ Add Google Account</span>
+      </button>
+
+      <div class="info-box">
+        <strong>About Account Management:</strong><br>
+        MeetMac uses Google's secure OAuth authentication. Your credentials are handled directly by Google and never stored by this app. Click "Add Google Account" to sign in with a new account via Google's authentication page.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      'use strict';
+
+      const accountList = document.getElementById('accountList');
+      const addAccountBtn = document.getElementById('addAccountBtn');
+
+      console.log('=== PREFERENCES SCRIPT STARTING ===');
+      console.log('ElectronAPI available:', !!window.electronAPI);
+
+      // Load current account info
+      async function loadAccounts() {
+        try {
+          const authStatus = await window.electronAPI.checkAuthStatus();
+          console.log('Auth status:', authStatus);
+
+          if (authStatus.authenticated) {
+            // Show current account
+            displayAccount({
+              email: 'Current Google Account',
+              active: true
+            });
+          } else {
+            showEmptyState();
+          }
+        } catch (error) {
+          console.error('Error loading accounts:', error);
+          showEmptyState();
+        }
+      }
+
+      function displayAccount(account) {
+        accountList.innerHTML = '';
+
+        const li = document.createElement('li');
+        li.className = 'account-item';
+
+        const initial = account.email.charAt(0).toUpperCase();
+
+        li.innerHTML = `
+          <div class="account-info">
+            <div class="account-avatar">${initial}</div>
+            <div class="account-details">
+              <div class="account-email">${account.email}</div>
+              <div class="account-status ${account.active ? 'active' : ''}">
+                ${account.active ? '● Active' : 'Signed out'}
+              </div>
+            </div>
+          </div>
+          <div class="account-actions">
+            <button class="btn btn-danger" onclick="handleSignOut()">Sign Out</button>
+          </div>
+        `;
+
+        accountList.appendChild(li);
+      }
+
+      function showEmptyState() {
+        accountList.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">👤</div>
+            <div class="empty-state-text">No accounts signed in</div>
+          </div>
+        `;
+      }
+
+      // Handle add account button
+      addAccountBtn.addEventListener('click', async function() {
+        console.log('=== ADD ACCOUNT CLICKED ===');
+
+        if (!window.electronAPI) {
+          console.error('ElectronAPI not available!');
+          return;
+        }
+
+        try {
+          addAccountBtn.disabled = true;
+          addAccountBtn.innerHTML = '<span>Opening Google sign-in...</span>';
+
+          const result = await window.electronAPI.signInWithGoogle();
+          console.log('Sign-in result:', result);
+
+          if (result.success) {
+            // Reload accounts
+            await loadAccounts();
+          }
+        } catch (error) {
+          console.error('Sign-in error:', error);
+          alert('Failed to sign in. Please try again.');
+        } finally {
+          addAccountBtn.disabled = false;
+          addAccountBtn.innerHTML = '<span>+ Add Google Account</span>';
+        }
+      });
+
+      // Handle sign out
+      window.handleSignOut = async function() {
+        const confirmed = confirm('Are you sure you want to sign out? You will need to sign in again to use MeetMac.');
+
+        if (confirmed) {
+          try {
+            await window.electronAPI.signOut();
+            await loadAccounts();
+          } catch (error) {
+            console.error('Sign out error:', error);
+          }
+        }
+      };
+
+      // Load accounts on start
+      if (window.electronAPI) {
+        loadAccounts();
+      }
+
+      console.log('=== PREFERENCES SCRIPT COMPLETE ===');
+    })();
+  </script>
+</body>
+</html>

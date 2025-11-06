@@ -1,0 +1,59 @@
+{
+  "name": "meetmac",
+  "version": "1.0.0",
+  "description": "MeetMac - Native macOS client for Google Meet",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "clean": "rm -rf dist build"
+  },
+  "keywords": [
+    "google-meet",
+    "electron",
+    "macos",
+    "video-conferencing",
+    "wrapper"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/notarize": "^3.1.0",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.meetmac",
+    "productName": "MeetMac",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "icon": "assets/icon.png",
+      "identity": null,
+      "signIgnore": [
+        "node_modules"
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "MeetMac needs access to control notifications",
+        "NSUserNotificationAlertStyle": "alert",
+        "NSCameraUsageDescription": "MeetMac needs access to your camera for video calls.",
+        "NSMicrophoneUsageDescription": "MeetMac needs access to your microphone for audio."
+      }
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    }
+  }
+}
