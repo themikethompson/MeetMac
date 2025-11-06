@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, ipcMain, shell, session, systemPreferences, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Notification, ipcMain, shell, session, systemPreferences, dialog, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -7,6 +7,14 @@ let authWindow;
 let mainWindow;
 let preferencesWindow;
 let isAuthenticated = false;
+
+// Meeting state tracking
+let meetingState = {
+  inMeeting: false,
+  isMuted: false,
+  isCameraOff: false,
+  participantCount: 0
+};
 
 // Google Meet URLs
 const GOOGLE_MEET_URL = 'https://meet.google.com';
@@ -574,6 +582,200 @@ function getMediaPermissionStatuses() {
   };
 }
 
+// Toggle microphone mute in Google Meet
+async function toggleMute() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    console.log('[MeetingControls] Main window not available');
+    return false;
+  }
+
+  try {
+    const result = await mainWindow.webContents.executeJavaScript(`
+      (function() {
+        // Find the microphone button by common selectors
+        const micButton = document.querySelector('[data-mute-button]') ||
+                         document.querySelector('[aria-label*="microphone" i][role="button"]') ||
+                         document.querySelector('[aria-label*="Turn on microphone" i]') ||
+                         document.querySelector('[aria-label*="Turn off microphone" i]') ||
+                         document.querySelector('[jsname="BOHaEe"]'); // Meet's mic button jsname
+
+        if (micButton) {
+          micButton.click();
+          console.log('[MeetingControls] Microphone button clicked');
+
+          // Try to determine mute state from aria-label
+          const ariaLabel = micButton.getAttribute('aria-label') || '';
+          const isMuted = ariaLabel.toLowerCase().includes('turn on');
+
+          return { success: true, isMuted: !isMuted }; // Invert because we just clicked
+        }
+
+        console.log('[MeetingControls] Microphone button not found');
+        return { success: false, error: 'Button not found' };
+      })()
+    `);
+
+    if (result.success) {
+      meetingState.isMuted = result.isMuted;
+      console.log(`[MeetingControls] Mute toggled. Now: ${result.isMuted ? 'muted' : 'unmuted'}`);
+      updateMenu(); // Refresh menu to show new state
+    }
+
+    return result.success;
+  } catch (error) {
+    console.error('[MeetingControls] Error toggling mute:', error);
+    return false;
+  }
+}
+
+// Toggle camera in Google Meet
+async function toggleCamera() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    console.log('[MeetingControls] Main window not available');
+    return false;
+  }
+
+  try {
+    const result = await mainWindow.webContents.executeJavaScript(`
+      (function() {
+        // Find the camera button by common selectors
+        const cameraButton = document.querySelector('[aria-label*="camera" i][role="button"]') ||
+                            document.querySelector('[aria-label*="Turn on camera" i]') ||
+                            document.querySelector('[aria-label*="Turn off camera" i]') ||
+                            document.querySelector('[jsname="I5DLJc"]'); // Meet's camera button jsname
+
+        if (cameraButton) {
+          cameraButton.click();
+          console.log('[MeetingControls] Camera button clicked');
+
+          // Try to determine camera state from aria-label
+          const ariaLabel = cameraButton.getAttribute('aria-label') || '';
+          const isCameraOff = ariaLabel.toLowerCase().includes('turn on');
+
+          return { success: true, isCameraOff: !isCameraOff }; // Invert because we just clicked
+        }
+
+        console.log('[MeetingControls] Camera button not found');
+        return { success: false, error: 'Button not found' };
+      })()
+    `);
+
+    if (result.success) {
+      meetingState.isCameraOff = result.isCameraOff;
+      console.log(`[MeetingControls] Camera toggled. Now: ${result.isCameraOff ? 'off' : 'on'}`);
+      updateMenu(); // Refresh menu to show new state
+    }
+
+    return result.success;
+  } catch (error) {
+    console.error('[MeetingControls] Error toggling camera:', error);
+    return false;
+  }
+}
+
+// Get current meeting control states
+async function getMeetingControlStates() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { isMuted: false, isCameraOff: false };
+  }
+
+  try {
+    const result = await mainWindow.webContents.executeJavaScript(`
+      (function() {
+        const micButton = document.querySelector('[data-mute-button]') ||
+                         document.querySelector('[aria-label*="microphone" i][role="button"]');
+        const cameraButton = document.querySelector('[aria-label*="camera" i][role="button"]');
+
+        let isMuted = false;
+        let isCameraOff = false;
+
+        if (micButton) {
+          const ariaLabel = micButton.getAttribute('aria-label') || '';
+          isMuted = ariaLabel.toLowerCase().includes('turn on');
+        }
+
+        if (cameraButton) {
+          const ariaLabel = cameraButton.getAttribute('aria-label') || '';
+          isCameraOff = ariaLabel.toLowerCase().includes('turn on');
+        }
+
+        return { isMuted, isCameraOff };
+      })()
+    `);
+
+    return result;
+  } catch (error) {
+    console.error('[MeetingControls] Error getting control states:', error);
+    return { isMuted: false, isCameraOff: false };
+  }
+}
+
+// Update meeting state and menu
+async function updateMeetingState() {
+  const inMeeting = await badgeManager.getCurrentMeetingState();
+
+  if (inMeeting !== meetingState.inMeeting) {
+    meetingState.inMeeting = inMeeting;
+    console.log(`[MeetingState] In meeting: ${inMeeting}`);
+  }
+
+  if (inMeeting) {
+    // Get control states
+    const controlStates = await getMeetingControlStates();
+    meetingState.isMuted = controlStates.isMuted;
+    meetingState.isCameraOff = controlStates.isCameraOff;
+  } else {
+    // Reset states when not in meeting
+    meetingState.isMuted = false;
+    meetingState.isCameraOff = false;
+    meetingState.participantCount = 0;
+  }
+
+  updateMenu();
+}
+
+// Register global keyboard shortcuts for meeting controls
+function registerGlobalShortcuts() {
+  try {
+    // Cmd+Shift+D to toggle mute (global shortcut)
+    const muteShortcut = globalShortcut.register('CommandOrControl+Shift+D', async () => {
+      if (meetingState.inMeeting) {
+        console.log('[GlobalShortcut] Mute toggle triggered');
+        await toggleMute();
+      }
+    });
+
+    if (muteShortcut) {
+      console.log('[GlobalShortcut] Registered: Cmd+Shift+D for mute toggle');
+    } else {
+      console.warn('[GlobalShortcut] Failed to register mute shortcut');
+    }
+
+    // Cmd+Shift+E to toggle camera (global shortcut)
+    const cameraShortcut = globalShortcut.register('CommandOrControl+Shift+E', async () => {
+      if (meetingState.inMeeting) {
+        console.log('[GlobalShortcut] Camera toggle triggered');
+        await toggleCamera();
+      }
+    });
+
+    if (cameraShortcut) {
+      console.log('[GlobalShortcut] Registered: Cmd+Shift+E for camera toggle');
+    } else {
+      console.warn('[GlobalShortcut] Failed to register camera shortcut');
+    }
+
+  } catch (error) {
+    console.error('[GlobalShortcut] Error registering shortcuts:', error);
+  }
+}
+
+// Unregister global shortcuts (called on app quit)
+function unregisterGlobalShortcuts() {
+  globalShortcut.unregisterAll();
+  console.log('[GlobalShortcut] All shortcuts unregistered');
+}
+
 // Create authentication welcome window
 function createAuthWindow() {
   authWindow = new BrowserWindow({
@@ -765,17 +967,27 @@ function createMainWindow() {
   });
 
   // Monitor navigation for meeting detection
-  mainWindow.webContents.on('did-navigate', (event, url) => {
+  mainWindow.webContents.on('did-navigate', async (event, url) => {
     const inMeeting = badgeManager.isMeetingURL(url);
     console.log(`[MeetMac] Navigation detected: ${url} → inMeeting: ${inMeeting}`);
     badgeManager.setMeetingState(inMeeting);
+
+    // Update full meeting state after navigation
+    setTimeout(async () => {
+      await updateMeetingState();
+    }, 1000);
   });
 
   // Also monitor in-page navigation (for single-page app transitions)
-  mainWindow.webContents.on('did-navigate-in-page', (event, url) => {
+  mainWindow.webContents.on('did-navigate-in-page', async (event, url) => {
     const inMeeting = badgeManager.isMeetingURL(url);
     console.log(`[MeetMac] In-page navigation detected: ${url} → inMeeting: ${inMeeting}`);
     badgeManager.setMeetingState(inMeeting);
+
+    // Update full meeting state after navigation
+    setTimeout(async () => {
+      await updateMeetingState();
+    }, 1000);
   });
 
   // Inject custom CSS and notification monitoring
@@ -961,6 +1173,9 @@ function createMainWindow() {
       const inMeeting = await badgeManager.getCurrentMeetingState();
       console.log(`[MeetMac] Page loaded, meeting state: ${inMeeting}`);
       badgeManager.setMeetingState(inMeeting);
+
+      // Update full meeting state (controls, menu, etc.)
+      await updateMeetingState();
     }, 1000);
   });
 
@@ -1079,6 +1294,40 @@ function createMenu() {
       ]
     },
     {
+      label: 'Meeting',
+      submenu: [
+        {
+          label: meetingState.inMeeting ? '✓ In Meeting' : 'Not in Meeting',
+          enabled: false
+        },
+        { type: 'separator' },
+        {
+          label: meetingState.isMuted ? '🎤 Unmute' : '🔇 Mute',
+          accelerator: 'CmdOrCtrl+D',
+          enabled: meetingState.inMeeting,
+          click: async () => {
+            await toggleMute();
+          }
+        },
+        {
+          label: meetingState.isCameraOff ? '📹 Turn On Camera' : '📷 Turn Off Camera',
+          accelerator: 'CmdOrCtrl+E',
+          enabled: meetingState.inMeeting,
+          click: async () => {
+            await toggleCamera();
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Refresh Meeting State',
+          accelerator: 'CmdOrCtrl+R',
+          click: async () => {
+            await updateMeetingState();
+          }
+        }
+      ]
+    },
+    {
       label: 'View',
       submenu: [
         { role: 'reload' },
@@ -1118,7 +1367,7 @@ function createMenu() {
         {
           label: 'Open Google Meet Help',
           click: async () => {
-            await shell.openExternal('https://support.google.com/chat');
+            await shell.openExternal('https://support.google.com/meet');
           }
         }
       ]
@@ -1127,6 +1376,11 @@ function createMenu() {
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
+}
+
+// Update menu to reflect current meeting state
+function updateMenu() {
+  createMenu();
 }
 
 // Note: updateUnreadCount function removed - MeetMac tracks meeting state instead of unread counts
@@ -1344,6 +1598,9 @@ app.whenReady().then(async () => {
     callback({ requestHeaders });
   });
 
+  // Register global shortcuts for meeting controls
+  registerGlobalShortcuts();
+
   // Check if already authenticated
   const wasAuthenticated = checkAuthState();
   const hasGoogleAuth = await checkGoogleAuth();
@@ -1355,6 +1612,16 @@ app.whenReady().then(async () => {
     console.log('No authentication found, showing welcome screen...');
     createAuthWindow();
   }
+
+  // Create menu
+  createMenu();
+
+  // Start periodic meeting state updates (every 3 seconds when in a meeting)
+  setInterval(async () => {
+    if (mainWindow && !mainWindow.isDestroyed() && meetingState.inMeeting) {
+      await updateMeetingState();
+    }
+  }, 3000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -1383,6 +1650,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  unregisterGlobalShortcuts();
 });
 
 // Certificate validation - DO NOT bypass certificate errors
