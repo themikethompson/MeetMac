@@ -1,10 +1,10 @@
-# MeetMac v0.1.0 - Initial Release
+# MeetMac v1.0.0 - Initial Release
 
 Native macOS client for Google Meet with advanced meeting controls and native integrations.
 
 ## 🎯 Overview
 
-This PR represents the complete initial implementation of MeetMac, transforming ChatMac into a fully-featured Google Meet client with native macOS integrations.
+This PR represents the complete initial implementation of MeetMac, transforming ChatMac into a fully featured Google Meet client with native macOS integrations.
 
 ## ✨ Key Features
 

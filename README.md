@@ -116,7 +116,7 @@ npm run build
 ## 🛠️ Development
 
 ### Project Structure
-```
+```plaintext
 MeetMac/
 ├── src/
 │   ├── main.js           # Main process (meeting controls, state management)
