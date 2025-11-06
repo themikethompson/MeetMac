@@ -218,6 +218,45 @@
       background: #e5e5e7;
       margin: 24px 0;
     }
+
+    .permission-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: #f5f5f7;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .permission-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .permission-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: #1d1d1f;
+      margin-bottom: 4px;
+    }
+
+    .permission-status {
+      font-size: 12px;
+      color: #86868b;
+    }
+
+    .permission-status.granted {
+      color: #34c759;
+    }
+
+    .permission-status.denied {
+      color: #ff3b30;
+    }
+
+    .permission-status.not-determined {
+      color: #ff9500;
+    }
   </style>
 </head>
 <body>
@@ -245,6 +284,39 @@
       <div class="info-box">
         <strong>About Account Management:</strong><br>
         MeetMac uses Google's secure OAuth authentication. Your credentials are handled directly by Google and never stored by this app. Click "Add Google Account" to sign in with a new account via Google's authentication page.
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <div class="section-title">Media Permissions</div>
+
+      <div class="permission-item">
+        <div class="permission-info">
+          <div class="permission-name">Camera</div>
+          <div class="permission-status" id="cameraStatus">Checking...</div>
+        </div>
+      </div>
+
+      <div class="permission-item">
+        <div class="permission-info">
+          <div class="permission-name">Microphone</div>
+          <div class="permission-status" id="microphoneStatus">Checking...</div>
+        </div>
+      </div>
+
+      <div class="permission-item">
+        <div class="permission-info">
+          <div class="permission-name">Screen Recording</div>
+          <div class="permission-status" id="screenStatus">Checking...</div>
+        </div>
+        <button class="btn btn-secondary" id="screenPermissionBtn">Open Settings</button>
+      </div>
+
+      <div class="info-box">
+        <strong>About Permissions:</strong><br>
+        MeetMac requires Camera and Microphone access for video calls. Screen Recording permission is needed to share your screen in meetings. You can manage these permissions in System Preferences > Privacy & Security.
       </div>
     </div>
   </div>
@@ -358,9 +430,71 @@
         }
       };
 
-      // Load accounts on start
+      // Load permission statuses
+      async function loadPermissions() {
+        if (!window.electronAPI || !window.electronAPI.getPermissionStatuses) {
+          console.error('Permission API not available');
+          return;
+        }
+
+        try {
+          const statuses = await window.electronAPI.getPermissionStatuses();
+          console.log('Permission statuses:', statuses);
+
+          // Update camera status
+          const cameraStatus = document.getElementById('cameraStatus');
+          cameraStatus.textContent = formatPermissionStatus(statuses.camera);
+          cameraStatus.className = `permission-status ${statuses.camera}`;
+
+          // Update microphone status
+          const microphoneStatus = document.getElementById('microphoneStatus');
+          microphoneStatus.textContent = formatPermissionStatus(statuses.microphone);
+          microphoneStatus.className = `permission-status ${statuses.microphone}`;
+
+          // Update screen recording status
+          const screenStatus = document.getElementById('screenStatus');
+          screenStatus.textContent = formatPermissionStatus(statuses.screen);
+          screenStatus.className = `permission-status ${statuses.screen}`;
+        } catch (error) {
+          console.error('Error loading permissions:', error);
+        }
+      }
+
+      function formatPermissionStatus(status) {
+        switch (status) {
+          case 'granted':
+            return '✓ Granted';
+          case 'denied':
+            return '✗ Denied';
+          case 'not-determined':
+            return '⚠ Not Requested';
+          case 'restricted':
+            return '⊘ Restricted';
+          case 'not-applicable':
+            return 'Not Applicable';
+          default:
+            return status || 'Unknown';
+        }
+      }
+
+      // Handle screen permission button
+      const screenPermissionBtn = document.getElementById('screenPermissionBtn');
+      if (screenPermissionBtn) {
+        screenPermissionBtn.addEventListener('click', async function() {
+          try {
+            await window.electronAPI.requestScreenSharingPermission();
+            // Reload permissions after a delay to show updated status
+            setTimeout(() => loadPermissions(), 1000);
+          } catch (error) {
+            console.error('Error requesting screen permission:', error);
+          }
+        });
+      }
+
+      // Load accounts and permissions on start
       if (window.electronAPI) {
         loadAccounts();
+        loadPermissions();
       }
 
       console.log('=== PREFERENCES SCRIPT COMPLETE ===');

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, ipcMain, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, Notification, ipcMain, shell, session, systemPreferences, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -487,6 +487,93 @@ async function checkGoogleAuth() {
   }
 }
 
+// Request media permissions (camera and microphone)
+async function requestMediaPermissions() {
+  if (process.platform !== 'darwin') {
+    console.log('[MediaPermissions] Not on macOS, skipping permission requests');
+    return;
+  }
+
+  try {
+    console.log('[MediaPermissions] Requesting camera and microphone access...');
+
+    // Request camera permission
+    const cameraStatus = systemPreferences.getMediaAccessStatus('camera');
+    console.log(`[MediaPermissions] Camera status: ${cameraStatus}`);
+
+    if (cameraStatus !== 'granted') {
+      const cameraGranted = await systemPreferences.askForMediaAccess('camera');
+      console.log(`[MediaPermissions] Camera access ${cameraGranted ? 'granted' : 'denied'}`);
+    }
+
+    // Request microphone permission
+    const micStatus = systemPreferences.getMediaAccessStatus('microphone');
+    console.log(`[MediaPermissions] Microphone status: ${micStatus}`);
+
+    if (micStatus !== 'granted') {
+      const micGranted = await systemPreferences.askForMediaAccess('microphone');
+      console.log(`[MediaPermissions] Microphone access ${micGranted ? 'granted' : 'denied'}`);
+    }
+
+    console.log('[MediaPermissions] Media permission requests complete');
+  } catch (error) {
+    console.error('[MediaPermissions] Error requesting media permissions:', error);
+  }
+}
+
+// Show screen sharing permission dialog
+function showScreenSharingPermissionDialog() {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+
+  // Check if screen recording permission is granted
+  // Note: On macOS 10.15+, screen recording requires explicit permission
+  const hasScreenPermission = systemPreferences.getMediaAccessStatus('screen');
+
+  if (hasScreenPermission === 'granted') {
+    console.log('[MediaPermissions] Screen recording permission already granted');
+    return;
+  }
+
+  console.log('[MediaPermissions] Screen recording permission not granted');
+
+  // Show dialog to guide user to System Preferences
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: 'Screen Sharing Permission Required',
+    message: 'To share your screen in Google Meet, MeetMac needs Screen Recording permission.',
+    detail: 'Go to System Preferences > Privacy & Security > Screen Recording and enable MeetMac.\n\nNote: You may need to restart MeetMac after granting permission.',
+    buttons: ['Open System Preferences', 'Later'],
+    defaultId: 0,
+    cancelId: 1
+  }).then(result => {
+    if (result.response === 0) {
+      // Open System Preferences to Screen Recording section
+      shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+    }
+  }).catch(err => {
+    console.error('[MediaPermissions] Error showing screen permission dialog:', err);
+  });
+}
+
+// Get current media permission statuses
+function getMediaPermissionStatuses() {
+  if (process.platform !== 'darwin') {
+    return {
+      camera: 'not-applicable',
+      microphone: 'not-applicable',
+      screen: 'not-applicable'
+    };
+  }
+
+  return {
+    camera: systemPreferences.getMediaAccessStatus('camera'),
+    microphone: systemPreferences.getMediaAccessStatus('microphone'),
+    screen: systemPreferences.getMediaAccessStatus('screen')
+  };
+}
+
 // Create authentication welcome window
 function createAuthWindow() {
   authWindow = new BrowserWindow({
@@ -622,7 +709,7 @@ function createMainWindow() {
   // Load Google Meet app
   mainWindow.loadURL(GOOGLE_MEET_APP_URL);
 
-  mainWindow.once('ready-to-show', () => {
+  mainWindow.once('ready-to-show', async () => {
     mainWindow.show();
 
     // Bring entire app and window into focus
@@ -633,6 +720,10 @@ function createMainWindow() {
     if (authWindow && !authWindow.isDestroyed()) {
       authWindow.close();
     }
+
+    // Request media permissions (camera and microphone)
+    // This will show system permission dialogs on first run
+    await requestMediaPermissions();
 
     // Initialize badge to clean state on startup
     // This prevents residual indicators from previous sessions
@@ -1116,6 +1207,15 @@ ipcMain.handle('auth:check-status', () => {
   return { authenticated: isAuthenticated };
 });
 
+ipcMain.handle('permissions:get-statuses', () => {
+  return getMediaPermissionStatuses();
+});
+
+ipcMain.handle('permissions:request-screen-sharing', () => {
+  showScreenSharingPermissionDialog();
+  return { success: true };
+});
+
 // Sanitize notification text to prevent XSS and injection attacks
 function sanitizeNotificationText(text, maxLength = 500) {
   if (typeof text !== 'string') {
@@ -1124,6 +1224,45 @@ function sanitizeNotificationText(text, maxLength = 500) {
 
   const withoutTags = text.replace(/<[^>]*>/g, '');
   return withoutTags.substring(0, maxLength);
+}
+
+// Parse and categorize meeting notifications
+function parseMeetingNotification(title, body) {
+  const lowercaseTitle = title.toLowerCase();
+  const lowercaseBody = body.toLowerCase();
+  const combined = `${lowercaseTitle} ${lowercaseBody}`;
+
+  // Detect notification types based on content
+  const notificationTypes = {
+    'participant-join': /joined|has joined|entered/i,
+    'participant-leave': /left|has left|exited/i,
+    'hand-raised': /raised.*hand|hand.*raised/i,
+    'chat-message': /message|chat|says/i,
+    'recording-start': /recording.*started|started.*recording/i,
+    'recording-stop': /recording.*stopped|stopped.*recording/i,
+    'meeting-start': /meeting.*starting|starting.*meeting|ready to join/i,
+    'meeting-end': /meeting.*ended|ended.*meeting/i,
+  };
+
+  for (const [type, pattern] of Object.entries(notificationTypes)) {
+    if (pattern.test(combined)) {
+      console.log(`[Notifications] Detected ${type} notification`);
+      return {
+        type,
+        title,
+        body,
+        timestamp: Date.now()
+      };
+    }
+  }
+
+  // Default type if no pattern matches
+  return {
+    type: 'general',
+    title,
+    body,
+    timestamp: Date.now()
+  };
 }
 
 ipcMain.on('notification', (event, data) => {
@@ -1138,6 +1277,10 @@ ipcMain.on('notification', (event, data) => {
     const sanitizedTitle = sanitizeNotificationText(data.title || 'MeetMac', 100);
     const sanitizedBody = sanitizeNotificationText(data.body || '', 500);
 
+    // Parse notification to detect meeting event type
+    const parsedNotification = parseMeetingNotification(sanitizedTitle, sanitizedBody);
+    console.log(`[Notifications] Showing ${parsedNotification.type} notification`);
+
     // Native macOS notification with default system sound
     const notificationOptions = {
       title: sanitizedTitle,
@@ -1150,7 +1293,7 @@ ipcMain.on('notification', (event, data) => {
 
     // Note: Removed app.dock.show() and manual badge setting
     // These were causing unwanted activity dots. The badge manager
-    // handles all badge state automatically based on unread count.
+    // handles all badge state automatically based on meeting state.
 
     // Handle notification click - bring app to focus and sync badge
     notification.on('click', () => {

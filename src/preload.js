@@ -91,6 +91,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('auth:success', () => callback());
   },
 
+  // Permission methods
+  getPermissionStatuses: () => {
+    return ipcRenderer.invoke('permissions:get-statuses');
+  },
+
+  requestScreenSharingPermission: () => {
+    return ipcRenderer.invoke('permissions:request-screen-sharing');
+  },
+
   // Platform information
   platform: process.platform,
 
