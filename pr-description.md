@@ -1,4 +1,4 @@
-# MeetMac v1.0.0 - Initial Release
+# MeetMac v0.1.0 - Initial Release
 
 Native macOS client for Google Meet with advanced meeting controls and native integrations.
 
@@ -13,7 +13,7 @@ This PR represents the complete initial implementation of MeetMac, transforming 
 - ✅ Updated all URLs and references (meet.google.com)
 - ✅ Session partition updated (persist:meetmac)
 - ✅ Camera and microphone entitlements configured
-- ✅ Package.json updated for MeetMac v1.0.0
+- ✅ Package.json updated for MeetMac v0.1.0
 
 ### Phase 2: Meeting Detection & Badge Management
 - ✅ **Meeting Detection System**
