@@ -825,10 +825,12 @@ function createGoogleAuthWindow() {
     // Set Chrome user agent for this window
     googleAuthWindow.webContents.setUserAgent(CHROME_USER_AGENT);
 
-    // Load Google Meet app URL - this will trigger sign-in if not authenticated
-    googleAuthWindow.loadURL(GOOGLE_MEET_APP_URL);
+    // Load Google sign-in page with redirect to Meet after authentication
+    // This ensures users see the proper Google authentication flow
+    const authURL = 'https://accounts.google.com/ServiceLogin?continue=https://meet.google.com';
+    googleAuthWindow.loadURL(authURL);
 
-    console.log('Opening Google Meet for authentication...');
+    console.log('Opening Google sign-in for authentication...');
 
     // Monitor navigation to detect successful login
     googleAuthWindow.webContents.on('did-navigate', async (event, url) => {
